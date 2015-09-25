@@ -136,6 +136,11 @@ Never set this variable directly, use the command
 (defvar auto-revert-timer nil
   "Timer used by Auto-Revert Mode.")
 
+(defvar auto-revert-vc-check-timer nil
+  "Timer used by Auto-Revert Mode to schedule
+checks of version control information. See
+`auto-revert-schedule-vc-check' for details.")
+
 (defcustom auto-revert-interval 5
   "Time, in seconds, between Auto-Revert Mode file checks.
 The value may be an integer or floating point number.
@@ -259,6 +264,13 @@ buffers.  CPU usage depends on the version control system."
   :group 'auto-revert
   :type 'boolean
   :version "22.1")
+
+(defcustom auto-revert-vc-check-idle-time 2
+  "How much time to wait after noticing a changed file before calling
+`vc-find-file-hook' or nil to check immediately."
+  :group 'auto-revert
+  :type 'number
+  :version "25.1")
 
 (defvar-local global-auto-revert-ignore-buffer nil
   "When non-nil, Global Auto-Revert Mode will not revert this buffer.
@@ -692,7 +704,28 @@ This is an internal function used by Auto-Revert Mode."
     ;; `preserve-modes' avoids changing the (minor) modes.  But we do
     ;; want to reset the mode for VC, so we do it manually.
     (when (or revert auto-revert-check-vc-info)
-      (vc-refresh-state))))
+      (auto-revert-schedule-vc-check))))
+
+(defun auto-revert-schedule-vc-check ()
+  "Schedule a call to `vc-find-file-hook'.
+
+We need to be careful when calling `vc-refresh-state' after file changes
+as some version control utilities (e.g. git rebase) have a tendency
+to do many successive calls and will fail ungracefully if they find
+we have taken the repository lock.
+
+For this reason we wait for the repository to be idle for at least
+`auto-revert-vc-check-idle-time' seconds before calling
+`vc-refresh-state'."
+  (if auto-revert-vc-check-idle-time
+      (progn
+        (when (timerp auto-revert-vc-check-timer)
+          (cancel-timer auto-revert-vc-check-timer))
+        (setq auto-revert-vc-check-idle-timer
+              (run-at-time auto-revert-vc-check-idle-time nil
+                           'vc-find-file-hook))
+        )
+    (vc-refresh-state)))
 
 (defun auto-revert-tail-handler (size)
   (let ((modified (buffer-modified-p))
